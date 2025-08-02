@@ -207,7 +207,6 @@ __marimo__/
 # Config and database (project-specific)
 config.yaml
 bot_db.sqlite3
-config.py
 
 # Logs
 *.log
