@@ -4,69 +4,35 @@ import yaml
 from time import time
 from datetime import datetime
 from collections import defaultdict
-
+from config import API_TOKEN, CHANNEL_ID, OWNER_ID, MEDIA_TIMEOUT
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
     InputMediaPhoto, InputMediaVideo
 )
+
 from aiogram.client.default import DefaultBotProperties
 
 from asyncio import create_task, sleep
 
-# === Config ===
-with open("config.yaml", "r", encoding="utf-8") as f:
-    config = yaml.safe_load(f)
-
-API_TOKEN = config["api_token"]
-OWNER_ID = config["owner_id"]
-CHANNEL_ID = config["channel_id"]
+from db import (
+    is_blocked, block_user, unblock_user,
+    get_blocked_users, save_idea, get_latest_ideas
+)
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
-
-# === Database Setup ===
-conn = sqlite3.connect("bot_db.sqlite3")
-cursor = conn.cursor()
-cursor.executescript("""
-    CREATE TABLE IF NOT EXISTS blocked_users (user_id INTEGER PRIMARY KEY);
-    CREATE TABLE IF NOT EXISTS ideas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        username TEXT,
-        message TEXT,
-        timestamp TEXT
-    );
-""")
-conn.commit()
 
 # === State ===
 ideas_cache = {}
 user_last_media = defaultdict(dict)
 media_groups = defaultdict(list)
 media_group_tasks = {}
-MEDIA_TIMEOUT = 20
 
 # === Helpers ===
-def is_blocked(user_id: int) -> bool:
-    cursor.execute("SELECT 1 FROM blocked_users WHERE user_id = ?", (user_id,))
-    return cursor.fetchone() is not None
-
-def block_user(user_id: int):
-    cursor.execute("INSERT OR IGNORE INTO blocked_users (user_id) VALUES (?)", (user_id,))
-    conn.commit()
-
-def unblock_user(user_id: int):
-    cursor.execute("DELETE FROM blocked_users WHERE user_id = ?", (user_id,))
-    conn.commit()
-
 async def send_to_channel(content_type, file_id, text, mention=None):
-    if mention:
-        caption = f"Сообщение от {mention}:\n{text}"
-    else:
-        caption = f"Сообщение от Анонимно:\n{text}"
-    
+    caption = f"Сообщение от {mention or 'Анонимно'}:\n{text}"
     send_map = {
         "text": bot.send_message,
         "photo": bot.send_photo,
@@ -76,14 +42,14 @@ async def send_to_channel(content_type, file_id, text, mention=None):
         "document": bot.send_document,
         "animation": bot.send_animation
     }
-    
+
     if content_type == "text":
-        # У send_message — текст через параметр text, а не caption
         await bot.send_message(CHANNEL_ID, caption)
     elif content_type in send_map:
         await send_map[content_type](CHANNEL_ID, file_id, caption=caption if file_id else None)
     else:
         await bot.send_message(CHANNEL_ID, caption)
+
 
 async def process_submission(message, user_id, username, text, content_type, file_id):
     msg_id = message.message_id
@@ -249,8 +215,7 @@ async def cmd_ideas(message: Message):
     if message.from_user.id != OWNER_ID:
         return
 
-    cursor.execute("SELECT id, user_id, username, message, timestamp FROM ideas ORDER BY timestamp DESC LIMIT 20")
-    rows = cursor.fetchall()
+    rows = get_latest_ideas()
     if not rows:
         await message.reply("В базе идей пока пусто.")
         return
@@ -268,8 +233,7 @@ async def cmd_banned(message: Message):
     if message.from_user.id != OWNER_ID:
         return
 
-    cursor.execute("SELECT user_id FROM blocked_users ORDER BY user_id")
-    rows = cursor.fetchall()
+    rows = get_blocked_users()
     if not rows:
         await message.reply("Список заблокированных пользователей пуст.")
         return
@@ -393,11 +357,10 @@ async def callback(callback_query: CallbackQuery):
         return await callback_query.answer("Опубликовано ✅")
 
     elif action == "idea":
-        cursor.execute("INSERT INTO ideas (user_id, username, message, timestamp) VALUES (?, ?, ?, ?)",
-                       (uid, uname, text, datetime.now().isoformat()))
-        conn.commit()
+        save_idea(uid, uname, text, datetime.now().isoformat())
         await callback_query.message.edit_reply_markup()
         return await callback_query.answer("Сохранено в базу 💡")
+
 
     elif action == "reject":
         await callback_query.message.edit_reply_markup()
