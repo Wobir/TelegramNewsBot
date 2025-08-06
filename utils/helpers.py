@@ -3,7 +3,7 @@ from config import CHANNEL_ID, OWNER_ID
 from utils.state import ideas_cache
 
 async def send_to_channel(bot, content_type, file_id, text, mention=None):
-    caption = f"Сообщение от {mention or 'Анонимно'}:\n{text}"
+    caption = f"{text}\n\nСообщение от:\n <code>{mention}</code>"
     send_map = {
         "text": bot.send_message,
         "photo": bot.send_photo,
@@ -27,6 +27,8 @@ async def process_submission(bot, message: Message, user_id, username, text, con
     ideas_cache[msg_id] = {
         "user_id": user_id,
         "username": username,
+        "first_name": message.from_user.first_name,
+        "last_name": message.from_user.last_name,
         "text": text,
         "content_type": content_type,
         "file_id": file_id

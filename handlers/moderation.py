@@ -22,7 +22,9 @@ def register_moderation_handlers(dp: Dispatcher, bot):
             return await callback_query.answer("Ошибка или устаревшие данные", show_alert=True)
 
         uid = data["user_id"]
-        uname = data["username"]
+        first = data.get("first_name") or ""
+        last = data.get("last_name") or ""
+        uname = f"{first} {last}".strip() or data.get("username") or "без имени"
         text = data["text"]
         ctype = data["content_type"]
         file_id = data["file_id"]
